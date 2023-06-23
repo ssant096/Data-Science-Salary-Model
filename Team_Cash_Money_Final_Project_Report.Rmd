@@ -1,0 +1,587 @@
+---
+title: 'Team Cash Money Final Project Report'
+author: "Shan Santhakumar, Eden Fraczkiewicz, Luis Colin Cornejo, Lorenzo Gonzalez, Vishal Gondi"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+## Introduction and Project Descripiton
+
+Our group wanted to study something relevant, so we choose to focus on what variables affect the salary of data scientists the most. We found a dataset on Kaggle which contained 3,755 rows and 11 columns of data on data scientist salaries. The data was not very large, but came from a site called ai-jobs.net which is a recruiting site for jobs in data science and related fields, so we felt this dataset was appropriate to use for our project.
+
+Our research question was “What are the factors that lead to the highest salary for a data scientist?” We wanted to find out the most important factors for attaining the highest possible salary as a data scientist. We would look at factors such as experience, job title, employee location, company size and location. We would then look to determine which factor impacts salary the most, and if there are multiple factors, we will try to find out which group of factors is the most important. 
+
+Questions we would like to answer include:
+
+Are there multiple factors that affect the salary for a data scientist?  
+If there are multiple factors, then what group of factors is the most valuable in increasing salary?  
+In order of least to most impact, what are the factors?  
+How strong is the correlation between each factor and salary?  
+Are there correlations between variables?  
+Are there any factors that lower salaries for data scientists and should be avoided?  
+Are these factors different in different countries?  
+If they are different for different countries, then we can find out the most important factors in certain countries.  
+
+
+## Data Exploration and Visualization
+
+Sample of the Data:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(maps)
+library("gridExtra") 
+library(boot) # for `cv.glm` function
+
+salaries = read.csv("ds_salaries.csv") # read the data
+head(salaries)
+```
+
+Exploratory Data Analysis (boxplots):
+
+```{r, echo=FALSE}
+plot1 = ggplot(data = salaries) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(company_size, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  #scale_x_discrete(labels = c('Small','Medium',
+  #                            'Large')) + # add more descriptive x labels
+  labs(x = "Compnay Size", y="US $ (in thousands)") # add labels
+
+plot2 = ggplot(data = salaries) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(employment_type, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Employment Type", y="US $ (in thousands)") # add labels
+
+plot3 = ggplot(data = salaries) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(experience_level, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Experience Level", y="US $ (in thousands)") # add labels
+
+# Find the top 10 most common values for job_title
+top_10_job_titles <- head(sort(table(salaries$job_title), decreasing = TRUE), 10)
+top_10_job_titles <- names(top_10_job_titles)
+
+# Filter the data to include only the top 10 job titles
+filtered_salaries <- subset(salaries, job_title %in% top_10_job_titles)
+
+# Create the boxplot
+plot4 <- ggplot(filtered_salaries, aes(x = reorder(job_title, salary_in_usd/1000, FUN = median), 
+                              y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Job Title", y = "US $ (in thousands)")
+
+# Filter the data for the specific remote_ratio values
+filtered_data <- subset(salaries, remote_ratio %in% c(0, 50, 100))
+
+# Create a box plot
+plot5 <- ggplot(filtered_data, aes(x = reorder(factor(remote_ratio), 
+                                   salary_in_usd/1000, FUN = median), y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  xlab("Ratio of Remote Work") +
+  ylab("US $ (in thousands)")
+
+
+grid.arrange(plot4, plot1, plot2, plot3, plot5, ncol = 2, nrow = 3) # print graphs
+
+```
+
+From the above box plots, we can see that those with the title of applied scientist, working in a medium sized company, working full time, with executive level experience, and working in person full time make the most money. 
+
+```{r, echo=FALSE}
+country_salaries <- salaries %>%
+  group_by(company_location) %>% # group data by company location
+  summarize(mean_salary = mean(salary_in_usd)) %>% # calculate mean salary by location
+  arrange(desc(mean_salary)) # sort from greatest to least salary
+```
+
+
+```{r, echo=FALSE, message=FALSE, results=FALSE, warning=FALSE}
+ggplot(data = salaries) + # global mapping
+  geom_histogram(mapping = aes(x = work_year)) # plot data for different years
+```
+  
+From this bar graph, we can see that our data comes from the past 4 years and is fairly recent, so the information we get from our project will not be outdated and might prove to be quite useful.
+
+```{r, echo=FALSE}
+qqnorm(salaries$salary_in_usd, # make qqplot to check normality of our data
+       main = "Q-Q Plot for Distribution of Salaries", 
+       ylab = "Sample Quantiles for Salary",
+       xlab = "Theoretical Quantiles for Salary") 
+qqline(salaries$salary_in_usd) # make line normal line for qqplot
+```
+
+We can also see that our data is normally distributed from this Q-Q plot.
+
+
+```{r}
+colSums(is.na(salaries))
+```
+
+Additionally our data contains no NA values.
+
+
+```{r, echo=FALSE}
+world_map = map_data("world")
+
+# Country code to country name mapping
+country_mapping <- data.frame(
+  country = c("IL", "PR", "US", "RU", "CA", "NZ", "BA", "IE", "JP", "SE", "AE", "CN", "DZ", "IQ", "IR", "MX", "LT", "DE", "GB", "CH", "AU", "NL", "NG", "BE", "HR", "AT", "FI", "FR", "HK", "CO", "SI", "PL", "LV", "UA", "ES", "RO", "SG", "GR", "PT", "AM", "CR", "PH", "CF", "EE", "DK", "BS", "KE", "LU", "IT", "BR", "CL", "MY", "CZ", "ID", "IN", "AS", "MT", "HU", "AR", "TH", "EG", "HN", "PK", "TR", "GH", "MD", "SK", "VN", "AL", "MA", "BO", "MK"),
+  country_name = c("Israel", "Puerto Rico", "USA", "Russia", "Canada", "New Zealand", "Bosnia and Herzegovina", "Ireland", "Japan", "Sweden", "United Arab Emirates", "China", "Algeria", "Iraq", "Iran", "Mexico", "Lithuania", "Germany", "United Kingdom", "Switzerland", "Australia", "Netherlands", "Nigeria", "Belgium", "Croatia", "Austria", "Finland", "France", "Hong Kong", "Colombia", "Slovenia", "Poland", "Latvia", "Ukraine", "Spain", "Romania", "Singapore", "Greece", "Portugal", "Armenia", "Costa Rica", "Philippines", "Central African Republic", "Estonia", "Denmark", "Bahamas", "Kenya", "Luxembourg", "Italy", "Brazil", "Chile", "Malaysia", "Czech Republic", "Indonesia", "India", "American Samoa", "Malta", "Hungary", "Argentina", "Thailand", "Egypt", "Honduras", "Pakistan", "Turkey", "Ghana", "Moldova", "Slovakia", "Vietnam", "Albania", "Morocco", "Bolivia", "Macedonia")
+)
+
+# Merge the earnings data with the country mapping
+merged_data <- left_join(country_mapping, country_salaries, by = c("country" = "company_location"))
+merged_data <- left_join(world_map, merged_data, by = c("region" = "country_name"))
+
+
+# Create the map
+map_plot <- ggplot(merged_data, aes(x = long, y = lat, # make the map
+                                    group = group, fill = mean_salary)) + # fill by mean salary
+  geom_polygon(color = "black") + # outline countries
+  scale_fill_gradient(low = "lightblue", high = "darkblue", na.value = "white") + # pick colors
+  theme_void() + # remove axis labels
+  ggtitle("Map of Mean Salary for Data Scientists Per Country")
+
+map_plot # print the map
+```
+
+From this heat map we can see that countries in the southern hemisphere appear to make less than countries in the northern hemisphere, with the exception of Australia, so this leads us to believe that location would be a good predictor of salary, which we would like to add to our analysis.
+
+
+### Data Analysis, Modeling and Predictions
+
+For our first model, we wanted to use the data we had to see which variable would have the most impact on data scientists' salaries so we decided to use a linear model to analyze this. However, our original data contained mostly categorical data, so we converted some of the categorical data into numerical data so we could use a linear model to model our data.
+
+```{r}
+int_data = salaries %>% # make needed categorical data into ints
+  mutate(int_experience_level = case_when(experience_level == "EN" ~ 1,
+                                          experience_level == "MI" ~ 2,
+                                          experience_level == "SE" ~ 3,
+                                          experience_level == "EX" ~ 4),
+         int_employment_type = case_when(employment_type == "PT" ~ 1,
+                                         employment_type == "FL" ~ 2,
+                                         employment_type == "CT" ~ 3,
+                                         employment_type == "FT" ~ 4),
+         int_company_size = case_when(company_size == "S" ~ 1,
+                                      company_size == "M" ~ 2, 
+                                      company_size == "L" ~ 3))
+
+```
+
+We chose to leave out job titles as a predictor since we did not feel there was an appropriate order for job titles as data scientist, data engineer and machine learning engineer are all very similar and it is hard to decide what order they should be placed in. 
+
+```{r, echo=FALSE}
+
+lm_result <- lm(salary_in_usd ~ int_experience_level + int_employment_type + int_company_size, data = int_data)
+summary(lm_result)
+
+```
+
+From our initial lm model, using experience level, employment type, and company size as predictors, we got an adjusted R^2 value of 0.1988, which is a good start.
+  
+  
+  
+After visualizing our heat map, we originally wanted to create models of countries with the top 5 highest mean salaries, however we were not able to since we did not have enough data for Israel, Puerto Rico, or Russia.
+
+```{r, echo=FALSE}
+#Make visualization for top 5 highest paid countries
+israel_data = int_data %>%
+  filter(company_location == "IL")
+puerto_rico_data = int_data %>%
+  filter(company_location == "PR")
+us_data = int_data %>%
+  filter(company_location == "US")
+russia_data = int_data %>%
+  filter(company_location == "RU")
+canada_data = int_data %>%
+  filter(company_location == "CA")
+
+# make frequency table of instances in top countries
+top_earning_countries = rep(c("Israel", "Puerto Rico", "US", 
+                      "Russia", "Canada"), times = c(nrow(israel_data),
+                                                     nrow(puerto_rico_data),
+                                                     nrow(us_data),
+                                                     nrow(russia_data),
+                                                     nrow(canada_data)))
+table(top_earning_countries)
+
+
+```
+
+So we decided to make models with the top 3 countries with the we had the most data on, which is US, Britain, and Canada. Hopefully this will improve our adjusted R^2 value, since by focusing on a specific country, we can eliminate location as a variable which will effect salary. Additionally we can also compare the effect of each variable between countries to see if certain countries value certain qualities more than other countries.
+
+```{r, echo=FALSE}
+# get top 3 countries with the most data
+most_data_countries = data.frame(count = table(salaries$company_location))
+most_data_countries %>% 
+  filter(count.Freq > 80)
+```
+
+
+
+```{r, echo=FALSE}
+# visualize data for US
+us_data = int_data %>%
+  filter(company_location == "US")
+
+plot1 = ggplot(data = us_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(company_size, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Compnay Size", y="US $ (in thousands)") # add labels
+
+plot2 = ggplot(data = us_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(employment_type, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Employment Type", y="US $ (in thousands)") # add labels
+
+plot3 = ggplot(data = us_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(experience_level, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Experience Level", y="US $ (in thousands)") # add labels
+
+# Find the top 10 most common values for job_title
+top_10_job_titles <- head(sort(table(us_data$job_title), decreasing = TRUE), 10)
+top_10_job_titles <- names(top_10_job_titles)
+
+# Filter the data to include only the top 10 job titles
+filtered_salaries <- subset(us_data, job_title %in% top_10_job_titles)
+
+# Create the boxplot
+plot4 <- ggplot(filtered_salaries, aes(x = reorder(job_title, salary_in_usd/1000, FUN = median), 
+                              y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Job Title", y = "US $ (in thousands)")
+
+# Filter the data for the specific remote_ratio values
+filtered_data <- subset(us_data, remote_ratio %in% c(0, 50, 100))
+
+# Create a box plot
+plot5 <- ggplot(filtered_data, aes(x = reorder(factor(remote_ratio), 
+                                   salary_in_usd/1000, FUN = median), y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  xlab("Ratio of Remote Work") +
+  ylab("US $ (in thousands)")
+
+
+grid.arrange(plot4, plot1, plot2, plot3, plot5, ncol = 2, nrow = 3) # print graphs
+```
+
+We wanted to conduct another round of visualizations for just the US data to see if there were any changes, and everything appeared to be the same as in our original plots.
+
+
+
+```{r, echo=FALSE}
+# visualize data for Britain
+gb_data = int_data %>%
+  filter(company_location == "GB")
+
+plot1 = ggplot(data = gb_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(company_size, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Compnay Size", y="US $ (in thousands)") # add labels
+
+plot2 = ggplot(data = gb_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(employment_type, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Employment Type", y="US $ (in thousands)") # add labels
+
+plot3 = ggplot(data = gb_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(experience_level, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Experience Level", y="US $ (in thousands)") # add labels
+
+# Find the top 10 most common values for job_title
+top_10_job_titles <- head(sort(table(gb_data$job_title), decreasing = TRUE), 10)
+top_10_job_titles <- names(top_10_job_titles)
+
+# Filter the data to include only the top 10 job titles
+filtered_salaries <- subset(gb_data, job_title %in% top_10_job_titles)
+
+# Create the boxplot
+plot4 <- ggplot(filtered_salaries, aes(x = reorder(job_title, salary_in_usd/1000, FUN = median), 
+                              y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Job Title", y = "US $ (in thousands)")
+
+# Filter the data for the specific remote_ratio values
+filtered_data <- subset(gb_data, remote_ratio %in% c(0, 50, 100))
+
+# Create a box plot
+plot5 <- ggplot(filtered_data, aes(x = reorder(factor(remote_ratio), 
+                                   salary_in_usd/1000, FUN = median), y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  xlab("Ratio of Remote Work") +
+  ylab("US $ (in thousands)")
+
+
+grid.arrange(plot4, plot1, plot2, plot3, plot5, ncol = 2, nrow = 3) # print graphs
+```
+
+We did the same for Britain and it followed a similar trend, but for employment type, we only had data on full-time employment in Britain. 
+
+
+```{r, echo=FALSE}
+# visualize data for Canada
+canada_data = int_data %>%
+  filter(company_location == "CA")
+
+plot1 = ggplot(data = canada_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(company_size, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Compnay Size", y="US $ (in thousands)") # add labels
+
+plot2 = ggplot(data = canada_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(employment_type, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Employment Type", y="US $ (in thousands)") # add labels
+
+plot3 = ggplot(data = canada_data) + # global mapping
+  geom_boxplot(mapping = aes(x = reorder(experience_level, salary_in_usd/1000, FUN = median), 
+                             y = salary_in_usd/1000)) + # make boxplot
+  labs(x = "Experience Level", y="US $ (in thousands)") # add labels
+
+# Find the top 10 most common values for job_title
+top_10_job_titles <- head(sort(table(canada_data$job_title), decreasing = TRUE), 10)
+top_10_job_titles <- names(top_10_job_titles)
+
+# Filter the data to include only the top 10 job titles
+filtered_salaries <- subset(canada_data, job_title %in% top_10_job_titles)
+
+# Create the boxplot
+plot4 <- ggplot(filtered_salaries, aes(x = reorder(job_title, salary_in_usd/1000, FUN = median), 
+                              y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Job Title", y = "US $ (in thousands)")
+
+# Filter the data for the specific remote_ratio values
+filtered_data <- subset(canada_data, remote_ratio %in% c(0, 50, 100))
+
+# Create a box plot
+plot5 <- ggplot(filtered_data, aes(x = reorder(factor(remote_ratio), 
+                                   salary_in_usd/1000, FUN = median), y = salary_in_usd/1000)) +
+  geom_boxplot() +
+  xlab("Ratio of Remote Work") +
+  ylab("US $ (in thousands)")
+
+
+grid.arrange(plot4, plot1, plot2, plot3, plot5, ncol = 2, nrow = 3) # print graphs
+```
+
+In Canada we do see different results than what we saw in the previous 2 countries. Machine learning software engineer is the highest paid title, and individuals with senior level experience actually make more than executive level, and those that work remote full time make the most and those that work 100% in person make the least.  
+  
+  
+  
+  
+Now we will make linear models for each country and see if we can improve our R^2 value.
+  
+  
+#### linear model for US data:
+  
+```{r, echo=FALSE}
+# Make linear model for US data
+us_data = us_data[, c("salary_in_usd", "int_experience_level", # get needed columns
+                       "int_employment_type", "int_company_size", 
+                       "remote_ratio")]
+
+
+
+lm.fit <- lm(salary_in_usd ~ ., data = us_data) # make model using all features
+
+summary(lm.fit) # make linear model of all features in America
+```
+
+Unfortunately our R^2 value actually decreased, so it would seem that country location is not a good predictor of salary for data scientists.
+
+
+#### Linear Model for Britain data:
+
+```{r, echo=FALSE}
+# Make linear model for Britain data
+gb_data = gb_data[, c("salary_in_usd", "int_experience_level", # get needed columns
+                       "int_employment_type", "int_company_size", 
+                       "remote_ratio")]
+
+
+
+lm.fit <- lm(salary_in_usd ~ ., data = gb_data) # make model using all features
+
+summary(lm.fit) # make linear model of all features in America
+```
+
+Our R^2 value for Britain is even lower than it was for the US data.
+
+
+
+#### Linear Model for Canada data:
+
+```{r, echo=FALSE}
+# Make linear model for Canada data
+canada_data = canada_data[, c("salary_in_usd", "int_experience_level", # get needed columns
+                       "int_employment_type", "int_company_size", 
+                       "remote_ratio")]
+
+
+
+lm.fit <- lm(salary_in_usd ~ ., data = canada_data) # make model using all features
+
+summary(lm.fit) # make linear model of all features in America
+```
+
+Our adjusted R^2 value for Canada is greater than it was for Britain, but it is still very low and lower than it was for the US.  
+  
+  
+  
+Our team believes that our R^2 value decreased when looking at specific countries because there is more deviation in salaries inside a country than between countries. 
+
+
+### Model Evaluation and Validation
+
+#### 10 Fold CV for US
+
+```{r}
+# make 10 fold CV for US
+set.seed(167) # set seed to get consistent data
+
+us_data = data.frame(scale(us_data)) # normalize the data to make it more readable for CV
+
+# get polynomial degree for experience level
+d <- 3 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_experience_level, i), data = us_data)
+  MSE.cv.10[i] <- cv.glm(us_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+# get polynomial degree for employment type
+d <- 3 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_employment_type, i), data = us_data)
+  MSE.cv.10[i] <- cv.glm(us_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+# get polynomial degree for company size
+d <- 2 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_company_size, i), data = us_data)
+  MSE.cv.10[i] <- cv.glm(us_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+glm.fit <- glm(salary_in_usd ~ poly(int_experience_level, 2) + 
+                 int_employment_type + 
+                 poly(int_company_size, 2), data = us_data) # make model using all features
+summary(glm.fit)
+
+cv.glm(data = us_data, glmfit = glm.fit, K = 10)$delta[1] # get CV MSE using all features
+
+```
+
+From the 10 fold cross validation results of our US data it is clear that experience level is the most important predictor of salary for data scientists in the US, as it has the lowest p-value. The next most important predictor is company size, and the least important predictor is employment type. 
+
+
+#### 10 Fold CV for Britain
+
+```{r}
+# make 10 fold CV for Britain
+set.seed(167)
+
+gb_data = data.frame(scale(gb_data)) # normalize the data to make it more readable
+
+# get polynomial degree for experience level
+d <- 2 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_experience_level, i), data = gb_data)
+  MSE.cv.10[i] <- cv.glm(gb_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+# get polynomial degree for company size
+d <- 2 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_company_size, i), data = gb_data)
+  MSE.cv.10[i] <- cv.glm(gb_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+glm.fit <- glm(salary_in_usd ~ int_experience_level + 
+                 int_company_size, data = gb_data) # make model using all features
+
+summary(glm.fit)
+cv.glm(data = gb_data, glmfit = glm.fit, K = 10)$delta[1] # get CV MSE using all features
+```
+
+From the 10 fold cross validation results of our Britain data, experience level is the only significant variable in Britain.
+
+
+#### 10 Fold CV for Canada
+
+```{r}
+# make 10 fold CV for Canada
+set.seed(167)
+
+canada_data = data.frame(scale(canada_data)) # normalize the data to make it more readable
+
+# get polynomial degree for experience level
+d <- 3 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d)
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_experience_level, i), data = canada_data)
+  MSE.cv.10[i] <- cv.glm(canada_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+# get polynomial degree for company size
+d <- 2 # max degree of polynomial fit
+MSE.cv.10 <- rep(0,d) 
+for (i in 1:d){
+  glm.fit <- glm(salary_in_usd ~ poly(int_company_size, i), data = canada_data)
+  MSE.cv.10[i] <- cv.glm(canada_data, glm.fit, K = 10)$delta[1]
+}
+MSE.cv.10
+
+
+glm.fit <- glm(salary_in_usd ~ poly(int_experience_level, 3) + 
+                 int_company_size, data = canada_data) # make model using all features
+summary(glm.fit)
+cv.glm(data = canada_data, glmfit = glm.fit, K = 10)$delta[1]  # get CV MSE using all features
+```
+
+From the 10 fold cross validation results of our Canada data, experience level is the only significant variable in Canada as well.  
+  
+  
+Looking at the MSE values, since the US has the lowest normalized MSE, out of Canada and Britain, it would seem that our model fits US data the best.
+
+
+### Conclusions
+
+Surprisingly enough we found that country location alone is not a good predictor of salaries for data scientists. We also concluded that overall the most important predictors for salary was overwhelmingly solely experience level. In the US, the next most important variables were company size then employment type, but for the other countries we looked at, experience level was the only significant predictor. Finally, as for limitations to our data, we were not able to take job title into consideration for our analysis, which may have been beneficial in increasing our models’ R^2 value. Our R^2 values were not high for any of our models so there is likely important predictors we are missing from our data such as location within a country.
+Lastly, we did not have much data for countries outside of the US, so our results may not be very accurate and representative of those countries.
+
+
+### Author Contributions
+
+Shan Santhakumar - Helped make graphs for exploratory data analysis (heatmap) and worked on 10 fold CV for US data.  
+Eden Fraczkiewicz - Worked on researching our data, helped make linear models for our top 3 countries with the most data and the 10 fold CV for Canada data.  
+Luis Colin Cornejo - Made graphs for exploratory data analysis (boxplots) and helped make linear models for our top 3 countries with the most data.  
+Lorenzo Gonzalez -  Worked on the initial data linear model and helped make linear models for our top 3 countries with the most data.  
+Vishal Gondi - Helped make graphs for exploratory data analysis (bargraphs), made graphs for summary statistics and created 10 fold CV for Britain data.  
+
+
+### Data/Code Availability
+
+https://www.kaggle.com/datasets/arnabchaki/data-science-salaries-2023?select=ds_salaries.csv
