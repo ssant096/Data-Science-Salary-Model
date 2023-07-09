@@ -1,5 +1,5 @@
 # Data Science Salary Prediction
-Final project for Introduction to Data Science class. Used data collected from aijobs.net to made a 10 fold CV model for evaluating the most important variables in determining the salary of a data scientist.
+Final project for Introduction to Data Science class. Used data collected from aijobs.net to made a 10 fold CV model for determining the most important variables which affect the salary of a data scientist.
 
 # Introduction and Project Descripiton
 Our group wanted to study something relevant, so we choose to focus on what variables affect the salary of data scientists the most. We found a
